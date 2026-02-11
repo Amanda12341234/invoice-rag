@@ -1,0 +1,15 @@
+fastapi>=0.104.0
+pydantic-settings>=2.1.0
+uvicorn[standard]>=0.24.0
+sqlmodel>=0.0.14
+psycopg2-binary>=2.9.9
+chromadb>=0.4.22
+google-genai>=1.0.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+python-multipart>=0.0.6
+httpx>=0.25.0
+pytest>=7.4.0
+pytest-bdd>=7.0.0
+pytest-asyncio>=0.23.0
+pytest-cov>=4.1.0

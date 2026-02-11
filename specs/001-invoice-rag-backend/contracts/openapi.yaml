@@ -1,0 +1,492 @@
+openapi: 3.1.0
+info:
+  title: AI 智能發票管家 API
+  version: 1.0.0
+  description: 發票管理與 RAG 語義查詢後端 API
+
+servers:
+  - url: /api/v1
+
+paths:
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: 使用者註冊
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthRequest'
+      responses:
+        '201':
+          description: 註冊成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '409':
+          description: 使用者名稱已存在
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: 使用者登入
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthRequest'
+      responses:
+        '200':
+          description: 登入成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          description: 認證失敗
+
+  /invoices/parse:
+    post:
+      tags: [Invoices]
+      summary: 上傳發票圖片進行 AI 解析（不存入 DB）
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required: [file]
+      responses:
+        '200':
+          description: 解析結果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParsedInvoice'
+        '422':
+          description: 解析失敗或驗證錯誤
+        '503':
+          description: AI 服務暫時不可用（重試後仍失敗）
+
+  /invoices:
+    post:
+      tags: [Invoices]
+      summary: 確認並儲存發票
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvoiceCreate'
+      responses:
+        '201':
+          description: 儲存成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceResponse'
+        '409':
+          description: 重複發票偵測（含 duplicate_info）
+    get:
+      tags: [Invoices]
+      summary: 查詢發票列表
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: start_date
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: end_date
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: 發票列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/InvoiceResponse'
+
+  /invoices/{id}:
+    get:
+      tags: [Invoices]
+      summary: 取得單筆發票明細（含品項）
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 發票明細
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceDetailResponse'
+        '404':
+          description: 發票不存在
+    put:
+      tags: [Invoices]
+      summary: 修改發票
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvoiceUpdate'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceResponse'
+        '404':
+          description: 發票不存在
+    delete:
+      tags: [Invoices]
+      summary: 刪除發票
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: 刪除成功
+        '404':
+          description: 發票不存在
+
+  /invoices/calendar:
+    get:
+      tags: [Invoices]
+      summary: 行事曆摘要（每日筆數與總額）
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: year
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: month
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 12
+      responses:
+        '200':
+          description: 月份摘要
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CalendarDay'
+
+  /chat:
+    post:
+      tags: [Chat]
+      summary: 發送對話訊息
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: AI 回答
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    AuthRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 50
+        password:
+          type: string
+          minLength: 6
+
+    UserResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    TokenResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+        token_type:
+          type: string
+          default: bearer
+
+    ParsedInvoice:
+      type: object
+      properties:
+        invoice_number:
+          type: string
+          nullable: true
+        store_name:
+          type: string
+        date:
+          type: string
+          format: date
+        total_amount:
+          type: number
+          minimum: 0
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ParsedItem'
+        category:
+          type: string
+          enum: [餐飲, 日用品, 交通, 居住, 娛樂, 服飾, 醫療, 教育, 工作, 社交, 寵物, 其他]
+        raw_text:
+          type: string
+        validation_errors:
+          type: array
+          items:
+            type: string
+
+    ParsedItem:
+      type: object
+      properties:
+        name:
+          type: string
+        price:
+          type: number
+          minimum: 0
+        quantity:
+          type: integer
+          minimum: 1
+          default: 1
+
+    InvoiceCreate:
+      type: object
+      required: [store_name, date, total_amount, items, category]
+      properties:
+        invoice_number:
+          type: string
+          nullable: true
+        store_name:
+          type: string
+          minLength: 1
+        date:
+          type: string
+          format: date
+        total_amount:
+          type: number
+          minimum: 0
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ItemCreate'
+        category:
+          type: string
+          enum: [餐飲, 日用品, 交通, 居住, 娛樂, 服飾, 醫療, 教育, 工作, 社交, 寵物, 其他]
+        raw_text:
+          type: string
+        ai_raw_output:
+          type: object
+        force_save:
+          type: boolean
+          default: false
+          description: 重複偵測提醒後，使用者選擇強制儲存
+
+    ItemCreate:
+      type: object
+      required: [name, price]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        price:
+          type: number
+          minimum: 0
+        quantity:
+          type: integer
+          minimum: 1
+          default: 1
+
+    InvoiceUpdate:
+      type: object
+      properties:
+        invoice_number:
+          type: string
+          nullable: true
+        store_name:
+          type: string
+          minLength: 1
+        date:
+          type: string
+          format: date
+        total_amount:
+          type: number
+          minimum: 0
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ItemCreate'
+        category:
+          type: string
+          enum: [餐飲, 日用品, 交通, 居住, 娛樂, 服飾, 醫療, 教育, 工作, 社交, 寵物, 其他]
+
+    InvoiceResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+        invoice_number:
+          type: string
+          nullable: true
+        store_name:
+          type: string
+        date:
+          type: string
+          format: date
+        total_amount:
+          type: number
+        category:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    InvoiceDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/InvoiceResponse'
+        - type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/ItemResponse'
+            raw_text:
+              type: string
+            ai_raw_output:
+              type: object
+
+    ItemResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        price:
+          type: number
+        quantity:
+          type: integer
+
+    CalendarDay:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        count:
+          type: integer
+        total_amount:
+          type: number
+
+    ChatRequest:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          minLength: 1
+        conversation_history:
+          type: array
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+
+    ChatMessage:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+
+    ChatResponse:
+      type: object
+      properties:
+        answer:
+          type: string
+        sources:
+          type: array
+          items:
+            type: object
+            properties:
+              invoice_id:
+                type: integer
+              store_name:
+                type: string
+              date:
+                type: string
+                format: date
+              relevance:
+                type: string
